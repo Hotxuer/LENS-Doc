@@ -27,17 +27,17 @@
         
 ## pointer_chasing_write_job: Pointer chasing write ONLY task.
 
-解析存储在sbi中的相关参数如region_size, block_size, 工作区范围等
+1. 解析存储在sbi中的相关参数如region_size, block_size, 工作区范围等
 
-根据block_size确定chasing function，每种block size对应相应load和store function
+2. 根据block_size确定chasing function，每种block size对应相应load和store function
 
-决定test round times，以GLOBAL_WORKSET / region_size为基准
+3. 决定test round times，以GLOBAL_WORKSET / region_size为基准
 
-初始化page table？
+4. 初始化page table
 
-在reportfs中生成pointer chasing index，即在一个region中不同block的chase次序，存储在cindex中。使用硬件随机数指令**RdRand**
+5. 在reportfs中生成pointer chasing index，即在一个region中不同block的chase次序，存储在cindex中。使用硬件随机数指令**RdRand**
 
-开始benchmark(time measurement略去)
+6. 开始benchmark(time measurement略去)
 
 - prepare
     - drop cache：使用**wbinvd**将cache中数据同步到内存中后清空cache，后**mfence**
@@ -273,8 +273,11 @@ static void chasing_read_after_write_##PCBLOCK_SIZE(char *start_addr,          \
 }
 
 ```
-## Task与测试用例对应关系
+## Task与Hardware Behavior对应关系
 
+pointer_chasing_read_and_write_job 对应 Buffer overflow和R/W amplification
+
+pointer_chasing_read_after_write_job 对应 Data fast-forwarding
 
 
 
