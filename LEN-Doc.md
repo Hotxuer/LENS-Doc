@@ -60,7 +60,7 @@
                     - 对于block = 128，分别进行两次cl_index = 0和1的上述过程，即连续写两个相邻的64block，更大的block_size以此类推。
                 - 使用**add**对存放在r10中的当前已访问空间大小加上一个block_size
                 - 使用**movq**将存放在xmm0寄存器中的下一个block的index更新入r12
-                - **cmp**判断当前已访问空间大小是否达到region_size，若达到**mfence**，否则继续内层循环
+                - **cmp**判断当前已访问空间大小是否达到region_size，若达到则**mfence**，否则继续内层循环
             - 使用**add** 和 **inc** 更新r8存放的当前region的offset以及r11存放的counter
             - **cmp**判断counter是否达到传入值，若达到则任务完成，否则继续外层循环
 - PC_BEFORE_READ， PC_AFTER_READ。在本task中没有read任务，无操作执行
@@ -120,10 +120,10 @@ static void chasing_stnt_##PCBLOCK_SIZE(char *start_addr, long size,           \
 - Run `mfence`
 - Record cycle `c_load_end`
 
-task job的基本流程和chasing_stnt_##block_size如上介绍，下面单独介绍本例用到的chasing_ldn_##block_size：
+task job的基本流程和chasing_stnt_##block_size如上介绍，下面单独介绍本例用到的chasing_ldn_##PCBLOCK_SIZE：
 
 - chasing_ldnt_##PCBLOCK_SIZE进行读操作，内联汇编代码见下
-    - 首先使用**xor** 将相关寄存器置零，其中r8记录当前待写region的offset, r11记录counter，即当前已写过的region个数，当counter达到传入值时终止外层循环
+    - 首先使用**xor** 将相关寄存器置零，其中r8记录当前待读region的offset, r11记录counter，即当前已读过的region个数，当counter达到传入值时终止外层循环
         - 外层循环：
             - 首先使用**lea**，通过start_addr和当前offset得到当前region的起始地址，存放在r9寄存器中
             - 使用**xor** 将相关寄存器置零，其中r10记录当前已经访问过的空间大小，达到region_size后即退出内层循环；r12记录当前block的index
@@ -135,7 +135,7 @@ task job的基本流程和chasing_stnt_##block_size如上介绍，下面单独�
                     - 对于block = 128，分别进行两次cl_index = 0和1的上述过程，即连续读两个相邻的64block，更大的block_size以此类推。
                 - 使用**add**对存放在r10中的当前已访问空间大小加上一个block_size
                 - 使用**movq**将存放在xmm0寄存器中的下一个block的index更新入r12
-                - **cmp**判断当前已访问空间大小是否达到region_size，若达到**mfence**，否则继续内层循环
+                - **cmp**判断当前已访问空间大小是否达到region_size，若达到则**mfence**，否则继续内层循环
             - 使用**add** 和 **inc** 更新r8存放的当前region的offset以及r11存放的counter
             - **cmp**判断counter是否达到传入值，若达到则任务完成，否则继续外层循环
 
@@ -192,6 +192,87 @@ static void chasing_ldnt_##PCBLOCK_SIZE(char *start_addr, long size,           \
 - Repeat step 1-4 for `count` rounds, on different 16KB regions
 - Record cycle `c_load_start`
 - Record cycle `c_load_end`
+
+下面单独介绍本例用到的chasing_read_after_write_##PCBLOCK_SIZE：
+
+-  chasing_read_after_write_##PCBLOCK_SIZE进行写后读操作，内联汇编代码见下
+    - 首先使用**xor** 将相关寄存器置零，其中r8记录当前region的offset, r11记录counter，即当前已操作过的region个数，当counter达到传入值时终止外层循环
+        - 外层循环：
+            - 首先使用**lea**，通过start_addr和当前offset得到当前region的起始地址，存放在r9寄存器中
+            - 使用**xor** 将相关寄存器置零，其中r10记录当前已经访问过的空间大小，达到region_size后即退出内层循环；r12记录当前block的index
+            - 内层写循环：
+                - 访问cindex，使用**vmovq** 将下一个待写block的index存入xmm0寄存器中
+                - 根据block_size大小，通过**shl**将r12中的index左移一定位数，如block_size = 64则左移6位，得到当前block相对region起始位置的偏移地址
+                - 根据block_size的大小进行写操作，具体方法和上述task相同位置一致。
+                - 使用**add**对存放在r10中的当前已访问空间大小加上一个block_size
+                - 使用**movq**将存放在xmm0寄存器中的下一个block的index更新入r12
+                - **cmp**判断当前已写空间大小是否达到region_size，若达到则**mfence**进入内层读循环，否则继续内层写循环
+            - 内层读循环
+                - 访问cindex，使用**vmovq** 将下一个待读block的index存入xmm0寄存器中
+                - 根据block_size大小，通过**shl**将r12中的index左移一定位数，如block_size = 64则左移6位，得到当前block相对region起始位置的偏移地址
+                - 根据block_size的大小进行读操作，具体方法和上述task相同位置一致。
+                - 使用**add**对存放在r10中的当前已访问空间大小加上一个block_size
+                - 使用**movq**将存放在xmm0寄存器中的下一个block的index更新入r12
+                - **cmp**判断当前已读空间大小是否达到region_size，若达到则**mfence**，否则继续内层读循环
+            - 使用**add** 和 **inc** 更新r8存放的当前region的offset以及r11存放的counter
+            - **cmp**判断counter是否达到传入值，若达到则任务完成，否则继续外层循环
+
+```
+static void chasing_read_after_write_##PCBLOCK_SIZE(char *start_addr,          \
+						    long size,                 \
+						    long skip,                 \
+						    long count,	               \
+						    uint64_t *cindex)          \
+{                                                                              \
+	KERNEL_BEGIN                                                           \
+	asm volatile(                                                          \
+		"xor    %%r8, %%r8 \n"                 /* r8: access offset  */\
+		"xor    %%r11, %%r11 \n"               /* r11: counter       */\
+		                                                               \
+	"LOOP_CHASING_RAW_NT_" #PCBLOCK_SIZE "_OUTER: \n"                      \
+		"lea    (%[start_addr], %%r8), %%r9 \n"/* r9: access loc     */\
+		"xor    %%r10, %%r10 \n"               /* r10: accessed size */\
+		"xor	%%r12, %%r12 \n"               /* r12: chasing index */\
+		                                                               \
+	"LOOP_CHASING_RAW_NT_WRITE_" #PCBLOCK_SIZE "_INNER: \n"                \
+		"vmovq  (%[cindex], %%r12, 8), %%xmm0\n"                       \
+		"shl	$" #PCBLOCK_SHIFT ", %%r12\n"                          \
+		CHASING_ST_##PCBLOCK_SIZE(0)                                   \
+		"add	$" #PCBLOCK_SIZE ", %%r10\n"                           \
+		"movq	%%xmm0, %%r12\n"                                       \
+								               \
+		"cmp    %[accesssize], %%r10 \n"                               \
+		"jl     LOOP_CHASING_RAW_NT_WRITE_" #PCBLOCK_SIZE "_INNER \n"  \
+		CHASING_MFENCE                                                 \
+								               \
+		"xor    %%r10, %%r10 \n"               /* r10: accessed size */\
+		"xor	%%r12, %%r12 \n"               /* r12: chasing index */\
+	"LOOP_CHASING_RAW_NT_READ_" #PCBLOCK_SIZE "_INNER: \n"                 \
+		"shl	$" #PCBLOCK_SHIFT ", %%r12\n"                          \
+		CHASING_LD_##PCBLOCK_SIZE(0)                                   \
+		"add	$" #PCBLOCK_SIZE ", %%r10\n"                           \
+		"movq	%%xmm0, %%r12\n"                                       \
+								               \
+		"cmp    %[accesssize], %%r10 \n"                               \
+		"jl     LOOP_CHASING_RAW_NT_READ_" #PCBLOCK_SIZE "_INNER \n"   \
+		CHASING_MFENCE                                                 \
+									       \
+		"add    %[skip], %%r8 \n"                                      \
+		"inc    %%r11 \n"                                              \
+		"cmp    %[count], %%r11 \n"                                    \
+								               \
+		"jl     LOOP_CHASING_RAW_NT_" #PCBLOCK_SIZE "_OUTER \n"        \
+								               \
+		:                                                              \
+		: [start_addr] "r"(start_addr),                                \
+		  [accesssize] "r"(size), [count] "r"(count),                  \
+		  [skip] "r"(skip), [cindex] "r"(cindex)                       \
+		: "%r12", "%r11", "%r10", "%r9", "%r8"                         \
+	);                                                                     \
+	KERNEL_END                                                             \
+}
+
+```
 ## Task与测试用例对应关系
 
 
